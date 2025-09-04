@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y ghostscript
 
 # Copy package.json and bun.lockb to leverage Docker cache
 # This step ensures that bun install is only re-run if dependencies change
-COPY package.json bun.lockb ./
+COPY package.json bun.lock ./
 
 # Install Bun dependencies
 RUN bun install --production
