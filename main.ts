@@ -10,6 +10,7 @@ import stripeRoutes from "./src/routes/stripe-routes";
 import usageRoutes from "./src/routes/usage-routes";
 import https from "https";
 import fs from "fs";
+import { apiLimiter } from "./src/middleware/rateLimiters";
 
 const app = express();
 const port = process.env.PORT || 9001;
@@ -31,10 +32,15 @@ app.use((err: any, req: any, res: any, next: any) => {
 // Routes
 app.use("/health", healthRoutes);
 app.use("/process", processRoutes);
-app.use("/api/keys", apiKeyRoutes);
-app.use("/api/subscription", subscriptionRoutes);
-app.use("/api/stripe", stripeRoutes);
-app.use("/api/usage", usageRoutes);
+
+const apiRouter = express.Router();
+apiRouter.use(apiLimiter);
+apiRouter.use("/keys", apiKeyRoutes);
+apiRouter.use("/subscription", subscriptionRoutes);
+apiRouter.use("/stripe", stripeRoutes);
+apiRouter.use("/usage", usageRoutes);
+
+app.use("/api", apiRouter);
 
 app.use((req, res) => {
 	res.status(404).send("Not Found");
