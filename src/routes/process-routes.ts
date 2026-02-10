@@ -1,10 +1,15 @@
 
 import { Router } from "express";
-import { preflightDocument, testDocument } from "../controllers/process-controllers";
+import {
+  convertDocumentToGrayscale,
+  preflightDocument,
+  testDocument,
+} from "../controllers/process-controllers";
 import multer from "multer";
 import { requireAuth } from "@clerk/express";
 import { tmpdir } from "os";
 import { syncUser } from "../middleware/syncUser";
+import { trackUsage } from "../middleware/trackUsage"; // Added
 import { preflightTestLimiter } from "../middleware/rateLimiters";
 
 const router = Router();
@@ -21,7 +26,15 @@ router.post("/preflight-test", preflightTestLimiter, upload.single("file"), test
 // All routes after this point require authentication and will sync the user.
 router.use(requireAuth(), syncUser);
 
-router.post("/preflight", upload.single("file"), preflightDocument);
+router.post("/preflight", trackUsage, upload.single("file"), preflightDocument);
+
+// Route for grayscale PDF conversion
+router.post(
+  "/grayscale",
+  trackUsage,
+  upload.single("file"),
+  convertDocumentToGrayscale,
+);
 
 // Route for document conversion
 router.get("/conversion", (req, res) => res.send("conversion"));

@@ -2,15 +2,17 @@ import type { Request, Response } from "express";
 import { type WithAuthProp } from "@clerk/express";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
+import { getClerkAuth } from "../lib/clerkAuth";
 
 export async function getSubscription(req: WithAuthProp<Request>, res: Response) {
-  if (!req.auth.userId) {
+  const auth = getClerkAuth(req);
+  if (!auth.userId) {
     return res.status(401).send("Unauthorized");
   }
 
   try {
     const subscription = await convex.query(api.subscriptions.get, {
-      userId: req.auth.userId,
+      userId: auth.userId,
     });
 
     if (!subscription) {

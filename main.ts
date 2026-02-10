@@ -8,6 +8,7 @@ import apiKeyRoutes from "./src/routes/apiKey-routes";
 import subscriptionRoutes from "./src/routes/subscription-routes";
 import stripeRoutes from "./src/routes/stripe-routes";
 import usageRoutes from "./src/routes/usage-routes";
+import apiProcessRoutes from "./src/routes/api/process-routes"; // Added
 import https from "https";
 import fs from "fs";
 import { apiLimiter } from "./src/middleware/rateLimiters";
@@ -39,6 +40,7 @@ apiRouter.use("/keys", apiKeyRoutes);
 apiRouter.use("/subscription", subscriptionRoutes);
 apiRouter.use("/stripe", stripeRoutes);
 apiRouter.use("/usage", usageRoutes);
+apiRouter.use("/process", apiProcessRoutes); // Added
 
 app.use("/api", apiRouter);
 

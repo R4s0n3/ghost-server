@@ -1,6 +1,10 @@
 import { unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join, parse } from "node:path";
 import { type Request, type Response } from "express";
 import { type WithAuthProp } from "@clerk/express";
+import { getClerkAuth } from "../lib/clerkAuth";
 
 
 
@@ -13,6 +17,12 @@ export async function testDocument(
 
 	if (!file) {
 		return res.status(400).json({ error: "File not found" });
+	}
+	const isPdf =
+		file.mimetype === "application/pdf" ||
+		file.originalname.toLowerCase().endsWith(".pdf");
+	if (!isPdf) {
+		return res.status(400).json({ error: "Only PDF files are supported" });
 	}
 
 	const tempPath = file.path;
@@ -38,8 +48,9 @@ export async function preflightDocument(
 	res: Response,
 ) {
 	// The ClerkExpressWithAuth middleware should protect this route.
-	// If you have routes that are not protected, you might need to check req.auth.
-	if (!req.auth?.userId) {
+	// If you have routes that are not protected, you might need to check auth explicitly.
+	const auth = getClerkAuth(req);
+	if (!auth.userId) {
 		return res.status(401).send("Unauthorized");
 	}
 
@@ -47,6 +58,12 @@ export async function preflightDocument(
 
 	if (!file) {
 		return res.status(400).json({ error: "File not found" });
+	}
+	const isPdf =
+		file.mimetype === "application/pdf" ||
+		file.originalname.toLowerCase().endsWith(".pdf");
+	if (!isPdf) {
+		return res.status(400).json({ error: "Only PDF files are supported" });
 	}
 
 	const tempPath = file.path;
@@ -67,13 +84,15 @@ export async function preflightDocument(
 	}
 }
 
-async function analyzePdf(filePath: string): Promise<any> {
+export async function analyzePdf(filePath: string): Promise<any> {
 	try {
 		// 1. Get Page Count
 		const pageCountProc = Bun.spawnSync([
 			"gs",
 			"-q",
 			"-dNODISPLAY",
+			"-dSAFER",
+			`--permit-file-read=${filePath}`,
 			"-c",
 			`(${filePath}) (r) file runpdfbegin pdfpagecount = quit`,
 		]);
@@ -88,6 +107,7 @@ async function analyzePdf(filePath: string): Promise<any> {
 			"gs",
 			"-q",
 			"-dNODISPLAY",
+			"-dSAFER",
 			"-dBATCH",
 			"-dNOPAUSE",
 			"-sDEVICE=bbox",
@@ -115,6 +135,7 @@ async function analyzePdf(filePath: string): Promise<any> {
 				"-q",
 				"-o",
 				"-",
+				"-dSAFER",
 				"-sDEVICE=inkcov",
 				`-dFirstPage=${i}`,
 				`-dLastPage=${i}`,
@@ -151,6 +172,7 @@ async function analyzePdf(filePath: string): Promise<any> {
 			"gs",
 			"-q",
 			"-dNODISPLAY",
+			"-dSAFER",
 			"-dDumpAnnots",
 			"-sDEVICE=nullpage",
 			filePath,
@@ -176,5 +198,98 @@ async function analyzePdf(filePath: string): Promise<any> {
 	} catch (e) {
 		console.error("Ghostscript analysis failed", e);
 		throw new Error("Failed to analyze PDF with Ghostscript.");
+	}
+}
+
+export function sanitizeBaseName(value: string): string {
+	const base = value.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+	return base.length > 0 ? base.slice(0, 80) : "document";
+}
+
+async function runGhostscript(args: string[]): Promise<void> {
+	const proc = Bun.spawn(args, { stdout: "ignore", stderr: "pipe" });
+	const [exitCode, stderr] = await Promise.all([
+		proc.exited,
+		new Response(proc.stderr).text(),
+	]);
+	if (exitCode !== 0) {
+		const message = stderr.trim() || "Unknown Ghostscript error";
+		throw new Error(`Ghostscript grayscale conversion failed: ${message}`);
+	}
+}
+
+export async function convertPdfToGrayscaleFile(
+	inputPath: string,
+	outputPath: string,
+): Promise<void> {
+	// DeviceGray ensures K-only output (no C/M/Y channels).
+	await runGhostscript([
+		"gs",
+		"-q",
+		"-dNOPAUSE",
+		"-dBATCH",
+		"-dSAFER",
+		"-sDEVICE=pdfwrite",
+		"-sColorConversionStrategy=Gray",
+		"-dProcessColorModel=/DeviceGray",
+		`-sOutputFile=${outputPath}`,
+		inputPath,
+	]);
+}
+
+export async function convertDocumentToGrayscale(
+	req: WithAuthProp<Request>,
+	res: Response,
+) {
+	const auth = getClerkAuth(req);
+	if (!auth.userId) {
+		return res.status(401).send("Unauthorized");
+	}
+
+	const file = req.file;
+	if (!file) {
+		return res.status(400).json({ error: "File not found" });
+	}
+
+	const isPdf =
+		file.mimetype === "application/pdf" ||
+		file.originalname.toLowerCase().endsWith(".pdf");
+	if (!isPdf) {
+		return res.status(400).json({ error: "Only PDF files are supported" });
+	}
+
+	const tempPath = file.path;
+	const baseName = sanitizeBaseName(parse(file.originalname).name);
+	const outputName = `${baseName}-grayscale.pdf`;
+	const outputPath = join(tmpdir(), `${baseName}-${randomUUID()}-grayscale.pdf`);
+
+	try {
+		await convertPdfToGrayscaleFile(tempPath, outputPath);
+		res.setHeader("Content-Type", "application/pdf");
+		return res.download(outputPath, outputName, async (err) => {
+			await unlink(tempPath).catch((cleanupErr) =>
+				console.error(`Failed to delete temp file: ${tempPath}`, cleanupErr),
+			);
+			await unlink(outputPath).catch((cleanupErr) =>
+				console.error(`Failed to delete output file: ${outputPath}`, cleanupErr),
+			);
+			if (err) {
+				console.error("Failed to send grayscale PDF", err);
+				if (!res.headersSent) {
+					res.status(500).json({ error: "Failed to send grayscale PDF" });
+				}
+			}
+		});
+	} catch (error: any) {
+		console.error(error);
+		await unlink(tempPath).catch((cleanupErr) =>
+			console.error(`Failed to delete temp file: ${tempPath}`, cleanupErr),
+		);
+		await unlink(outputPath).catch((cleanupErr) =>
+			console.error(`Failed to delete output file: ${outputPath}`, cleanupErr),
+		);
+		return res
+			.status(500)
+			.json({ error: error.message ?? "Failed to convert PDF" });
 	}
 }

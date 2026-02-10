@@ -2,7 +2,10 @@
   "name": "server",
   "private": true,
   "scripts": {
-    "start": "bun --hot main.ts"
+    "start": "bun run dev",
+    "dev": "bun --hot main.ts",
+    "start:server": "bun --hot main.ts",
+    "start:convex": "bunx convex dev"
   },
   "devDependencies": {
     "@types/bun": "latest",

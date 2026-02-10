@@ -3,18 +3,20 @@ import { type WithAuthProp } from "@clerk/express";
 import { stripe } from "../lib/stripe";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
+import { getClerkAuth } from "../lib/clerkAuth";
 
 export async function createCheckoutSession(
 	req: WithAuthProp<Request>,
 	res: Response
 ) {
-	if (!req.auth.userId) {
+	const auth = getClerkAuth(req);
+	if (!auth.userId) {
 		return res.status(401).send("Unauthorized");
 	}
 
 	try {
 		const user = await convex.action(api.users.getUserForStripe, {
-			clerkId: req.auth.userId,
+			clerkId: auth.userId,
 		});
 
 		if (!user) {
@@ -75,7 +77,8 @@ export async function syncStripeSession(
 	req: WithAuthProp<Request>,
 	res: Response
 ) {
-	if (!req.auth.userId) {
+	const auth = getClerkAuth(req);
+	if (!auth.userId) {
 		return res.status(401).send("Unauthorized");
 	}
 
@@ -102,7 +105,7 @@ export async function syncStripeSession(
 		}
 
 		const user = await convex.action(api.users.getUserForStripe, {
-			clerkId: req.auth.userId,
+			clerkId: auth.userId,
 		});
 
 		if (!user) {
@@ -111,13 +114,13 @@ export async function syncStripeSession(
 
 		// Check if user already has a subscription
 		const existingSubscription = await convex.query(api.subscriptions.get, {
-			userId: req.auth.userId,
+			userId: auth.userId,
 		});
 
 		if (existingSubscription) {
 			// Update existing subscription
 			await convex.action(api.subscriptions.updateSubscription, {
-				userId: req.auth.userId, // Pass Clerk ID to action
+				userId: auth.userId, // Pass Clerk ID to action
 				status: "active",
 				stripeSubscriptionId: subscriptionId as string,
 				stripePriceId: priceId,
@@ -125,7 +128,7 @@ export async function syncStripeSession(
 		} else {
 			// Create new subscription
 			await convex.action(api.subscriptions.createSubscription, {
-				userId: req.auth.userId, // Pass Clerk ID to action
+				userId: auth.userId, // Pass Clerk ID to action
 				plan: "pro", // You might want to determine this from the priceId
 				status: "active",
 				stripeSubscriptionId: subscriptionId as string,
@@ -144,13 +147,14 @@ export async function createCustomerPortalSession(
 	req: WithAuthProp<Request>,
 	res: Response
 ) {
-	if (!req.auth.userId) {
+	const auth = getClerkAuth(req);
+	if (!auth.userId) {
 		return res.status(401).send("Unauthorized");
 	}
 
 	try {
 		const user = await convex.action(api.users.getUserForStripe, {
-			clerkId: req.auth.userId,
+			clerkId: auth.userId,
 		});
 
 		if (!user || !user.stripeCustomerId) {
