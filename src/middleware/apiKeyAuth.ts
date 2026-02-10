@@ -22,7 +22,7 @@ export const apiKeyAuth = async (
   }
 
   try {
-    // This single action authenticates the key, gets the user, and tracks usage.
+    // This action authenticates the key and returns the owning user.
     const user = await convex.action(api.apiKeys.authenticateAndTrackUsage, {
       key: apiKey,
     });

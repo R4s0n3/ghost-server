@@ -20,9 +20,6 @@ export const authenticateAndTrackUsage = action({
 			return null;
 		}
 
-		// Await the usage increment to ensure it completes.
-		await ctx.runMutation(internal.usage.increment, { userId: user._id });
-
 		return user;
 	}
 });

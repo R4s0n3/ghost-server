@@ -28,4 +28,15 @@ export default defineSchema({
     date: v.string(), // YYYY-MM-DD format
     count: v.number(),
   }).index("by_userId_and_date", ["userId", "date"]),
+
+  usageReservations: defineTable({
+    userId: v.id("users"),
+    date: v.string(), // YYYY-MM-DD format
+    units: v.number(),
+    status: v.string(), // pending, committed, released, expired
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    committedAt: v.optional(v.number()),
+    releasedAt: v.optional(v.number()),
+  }).index("by_userId_and_date", ["userId", "date"]),
 });

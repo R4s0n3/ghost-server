@@ -4,6 +4,7 @@ import { stripe } from "../lib/stripe";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { getClerkAuth } from "../lib/clerkAuth";
+import { getPlanForPriceId } from "../lib/plans";
 
 export async function createCheckoutSession(
 	req: WithAuthProp<Request>,
@@ -46,6 +47,11 @@ export async function createCheckoutSession(
 			return res
 				.status(400)
 				.send("Missing required parameters: priceId, successUrl, cancelUrl");
+		}
+
+		const planId = getPlanForPriceId(priceId);
+		if (!planId) {
+			return res.status(400).send("Unknown or unsupported Stripe price ID.");
 		}
 
 		const session = await stripe.checkout.sessions.create({
@@ -104,6 +110,11 @@ export async function syncStripeSession(
 				.send("Could not find subscription or price ID in session.");
 		}
 
+		const planId = getPlanForPriceId(priceId);
+		if (!planId) {
+			return res.status(400).send("Unknown or unsupported Stripe price ID.");
+		}
+
 		const user = await convex.action(api.users.getUserForStripe, {
 			clerkId: auth.userId,
 		});
@@ -121,6 +132,7 @@ export async function syncStripeSession(
 			// Update existing subscription
 			await convex.action(api.subscriptions.updateSubscription, {
 				userId: auth.userId, // Pass Clerk ID to action
+				plan: planId,
 				status: "active",
 				stripeSubscriptionId: subscriptionId as string,
 				stripePriceId: priceId,
@@ -129,7 +141,7 @@ export async function syncStripeSession(
 			// Create new subscription
 			await convex.action(api.subscriptions.createSubscription, {
 				userId: auth.userId, // Pass Clerk ID to action
-				plan: "pro", // You might want to determine this from the priceId
+				plan: planId,
 				status: "active",
 				stripeSubscriptionId: subscriptionId as string,
 				stripePriceId: priceId,

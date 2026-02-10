@@ -12,6 +12,7 @@ import apiProcessRoutes from "./src/routes/api/process-routes"; // Added
 import https from "https";
 import fs from "fs";
 import { apiLimiter } from "./src/middleware/rateLimiters";
+import { handleStripeWebhook } from "./src/controllers/stripe-webhook-controller";
 
 const app = express();
 const port = process.env.PORT || 9001;
@@ -38,6 +39,9 @@ app.use(cors({
 	methods: ['GET', 'POST', 'PATCH', 'DELETE'],
 	allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'X-API-Key']
 }));
+
+// Stripe webhooks require the raw request body for signature verification.
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
 
 // Middleware to parse JSON request bodies
 app.use(express.json());

@@ -12,7 +12,7 @@ const router = Router();
 // Configure multer to save files to the system's temp directory
 const upload = multer({
   dest: tmpdir(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
 });
 
 // All routes in this file are for API key authenticated requests

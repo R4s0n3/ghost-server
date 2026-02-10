@@ -5,14 +5,140 @@ import { join, parse } from "node:path";
 import { type Request, type Response } from "express";
 import { type WithAuthProp } from "@clerk/express";
 import { getClerkAuth } from "../lib/clerkAuth";
+import {
+	commitReservationForClerkUser,
+	releaseReservationForClerkUser,
+	reserveUnitsForClerkUser,
+} from "../lib/quota";
+import { ghostscriptQueue } from "../lib/ghostscriptQueue";
 
+async function runGhostscriptCommand(args: string[]) {
+	const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+	const [exitCode, stdout, stderr] = await Promise.all([
+		proc.exited,
+		new Response(proc.stdout).text(),
+		new Response(proc.stderr).text(),
+	]);
 
+	if (exitCode !== 0) {
+		const message = stderr.trim() || stdout.trim() || "Unknown Ghostscript error";
+		throw new Error(message);
+	}
+
+	return { stdout, stderr };
+}
+
+export async function getPdfPageCount(filePath: string): Promise<number> {
+	const { stdout, stderr } = await runGhostscriptCommand([
+		"gs",
+		"-q",
+		"-dNODISPLAY",
+		"-dSAFER",
+		`--permit-file-read=${filePath}`,
+		"-c",
+		`(${filePath}) (r) file runpdfbegin pdfpagecount = quit`,
+	]);
+	const raw = stdout.trim() || stderr.trim();
+	const pageCount = parseInt(raw, 10);
+	if (!Number.isFinite(pageCount) || pageCount <= 0) {
+		throw new Error("Invalid page count reported by Ghostscript.");
+	}
+	return pageCount;
+}
+
+export async function analyzePdf(
+	filePath: string,
+	pageCountOverride?: number,
+): Promise<any> {
+	try {
+		// 1. Get Page Count
+		const pageCount = pageCountOverride ?? (await getPdfPageCount(filePath));
+
+		// 2. Get Page Sizes (BBox)
+		const bboxResult = await runGhostscriptCommand([
+			"gs",
+			"-q",
+			"-dNODISPLAY",
+			"-dSAFER",
+			"-dBATCH",
+			"-dNOPAUSE",
+			"-sDEVICE=bbox",
+			filePath,
+		]);
+		const bboxOutput = bboxResult.stderr;
+		console.log("BBox output:", bboxOutput);
+		const pageSizes =
+			bboxOutput
+				.match(/%%BoundingBox: \d+ \d+ \d+ \d+/g)
+				?.map(line => {
+					const parts = line.replace("%%BoundingBox: ", "").split(" ");
+					const [x1, y1, x2, y2] = parts.map(p => parseInt(p, 10));
+					return { width_pt: x2 - x1, height_pt: y2 - y1 };
+				}) || [];
+		console.log("Parsed page sizes:", pageSizes);
+
+		// 3. Get Color Info (Ink Coverage) for each page
+		const colorProfiles = [];
+		for (let i = 1; i <= pageCount; i++) {
+			const inkcovResult = await runGhostscriptCommand([
+				"gs",
+				"-q",
+				"-o",
+				"-",
+				"-dSAFER",
+				"-sDEVICE=inkcov",
+				`-dFirstPage=${i}`,
+				`-dLastPage=${i}`,
+				filePath,
+			]);
+			const inkcovOutput = inkcovResult.stdout.toString().trim();
+			console.log(`Inkcov output for page ${i}:`, inkcovOutput);
+			const [c, m, y, k, type] = inkcovOutput.split(/\s+/);
+
+			const newProfile = {
+				page: i,
+				c: +c,
+				m: +m,
+				y: +y,
+				k: +k,
+				type,
+			};
+
+			console.log("generated Profile:: ", newProfile);
+			colorProfiles.push(newProfile);
+		}
+
+		// 4. Check for Form Fields (by checking for Annots with /Widget subtype)
+		const annotsResult = await runGhostscriptCommand([
+			"gs",
+			"-q",
+			"-dNODISPLAY",
+			"-dSAFER",
+			"-dDumpAnnots",
+			"-sDEVICE=nullpage",
+			filePath,
+		]);
+		const annotsOutput =
+			annotsResult.stdout.toString() + annotsResult.stderr.toString();
+		console.log("DumpAnnots output:", annotsOutput);
+		const has_formfields = /\/Subtype \/Widget/.test(annotsOutput);
+
+		return {
+			file_name: filePath.split("/").pop(),
+			page_count: pageCount,
+			has_formfields,
+			colorProfiles,
+		};
+	} catch (e) {
+		console.error("Ghostscript analysis failed", e);
+		throw new Error("Failed to analyze PDF with Ghostscript.");
+	}
+}
 
 export async function testDocument(
 	req: Request,
 	res: Response
 ) {
-
 	const file = req.file;
 
 	if (!file) {
@@ -28,7 +154,7 @@ export async function testDocument(
 	const tempPath = file.path;
 
 	try {
-		const analysis = await analyzePdf(tempPath);
+		const analysis = await ghostscriptQueue.run(() => analyzePdf(tempPath));
 		// Set the file_name to the original name of the uploaded file.
 		analysis.file_name = file.originalname;
 		return res.json(analysis);
@@ -41,8 +167,8 @@ export async function testDocument(
 			console.error(`Failed to delete temp file: ${tempPath}`, err),
 		);
 	}
-
 }
+
 export async function preflightDocument(
 	req: WithAuthProp<Request>,
 	res: Response,
@@ -69,7 +195,46 @@ export async function preflightDocument(
 	const tempPath = file.path;
 
 	try {
-		const analysis = await analyzePdf(tempPath);
+		const result = await ghostscriptQueue.run(async () => {
+			const pageCount = await getPdfPageCount(tempPath);
+			const units = pageCount * 2;
+			const reservation = await reserveUnitsForClerkUser(auth.userId, units);
+			if (!reservation.allowed) {
+				return { reservation, units };
+			}
+
+			if (!reservation.reservationId) {
+				throw new Error("Failed to create usage reservation.");
+			}
+
+			try {
+				const analysis = await analyzePdf(tempPath, pageCount);
+				const commitResult = await commitReservationForClerkUser(
+					auth.userId,
+					reservation.reservationId,
+				);
+				if (!commitResult?.committed) {
+					console.warn("Usage reservation commit failed", commitResult);
+				}
+				return { analysis, reservation, units };
+			} catch (error) {
+				await releaseReservationForClerkUser(auth.userId, reservation.reservationId);
+				throw error;
+			}
+		});
+
+		if (!result.analysis) {
+			return res.status(402).json({
+				error: "Monthly quota exceeded.",
+				plan: result.reservation.planId,
+				monthlyQuota: result.reservation.monthlyQuota,
+				unitsThisMonth: result.reservation.totalThisMonth,
+				pendingUnits: result.reservation.pendingUnits,
+				unitsRequested: result.units,
+			});
+		}
+
+		const analysis = result.analysis;
 		// Set the file_name to the original name of the uploaded file.
 		analysis.file_name = file.originalname;
 		return res.json(analysis);
@@ -81,123 +246,6 @@ export async function preflightDocument(
 		await unlink(tempPath).catch(err =>
 			console.error(`Failed to delete temp file: ${tempPath}`, err),
 		);
-	}
-}
-
-export async function analyzePdf(filePath: string): Promise<any> {
-	try {
-		// 1. Get Page Count
-		const pageCountProc = Bun.spawnSync([
-			"gs",
-			"-q",
-			"-dNODISPLAY",
-			"-dSAFER",
-			`--permit-file-read=${filePath}`,
-			"-c",
-			`(${filePath}) (r) file runpdfbegin pdfpagecount = quit`,
-		]);
-		if (pageCountProc.exitCode !== 0)
-			throw new Error(
-				`Ghostscript page count failed: ${pageCountProc.stderr}`,
-			);
-		const pageCount = parseInt(pageCountProc.stdout.toString().trim(), 10);
-
-		// 2. Get Page Sizes (BBox)
-		const bboxProc = Bun.spawnSync([
-			"gs",
-			"-q",
-			"-dNODISPLAY",
-			"-dSAFER",
-			"-dBATCH",
-			"-dNOPAUSE",
-			"-sDEVICE=bbox",
-			filePath,
-		]);
-		if (bboxProc.exitCode !== 0)
-			throw new Error(`Ghostscript bbox failed: ${bboxProc.stderr}`);
-		const bboxOutput = bboxProc.stderr.toString();
-		console.log("BBox output:", bboxOutput);
-		const pageSizes =
-			bboxOutput
-				.match(/%%BoundingBox: \d+ \d+ \d+ \d+/g)
-				?.map(line => {
-					const parts = line.replace("%%BoundingBox: ", "").split(" ");
-					const [x1, y1, x2, y2] = parts.map(p => parseInt(p, 10));
-					return { width_pt: x2 - x1, height_pt: y2 - y1 };
-				}) || [];
-		console.log("Parsed page sizes:", pageSizes);
-
-		// 3. Get Color Info (Ink Coverage) for each page
-		const colorProfiles = [];
-		for (let i = 1; i <= pageCount; i++) {
-			const inkcovProc = Bun.spawnSync([
-				"gs",
-				"-q",
-				"-o",
-				"-",
-				"-dSAFER",
-				"-sDEVICE=inkcov",
-				`-dFirstPage=${i}`,
-				`-dLastPage=${i}`,
-				filePath,
-			]);
-			if (inkcovProc.exitCode !== 0) {
-				console.error(
-					`Ghostscript inkcov failed for page ${i}:`,
-					inkcovProc.stderr.toString(),
-				);
-				throw new Error(
-					`Ghostscript inkcov failed for page ${i}: ${inkcovProc.stderr}`,
-				);
-			}
-			const inkcovOutput = inkcovProc.stdout.toString().trim();
-			console.log(`Inkcov output for page ${i}:`, inkcovOutput);
-			const [c, m, y, k, type] = inkcovOutput.split(/\s+/);
-
-			const newProfile = {
-				page: i,
-				c: +c,
-				m: +m,
-				y: +y,
-				k: +k,
-				type,
-			};
-
-			console.log("generated Profile:: ", newProfile);
-			colorProfiles.push(newProfile);
-		}
-
-		// 4. Check for Form Fields (by checking for Annots with /Widget subtype)
-		const annotsProc = Bun.spawnSync([
-			"gs",
-			"-q",
-			"-dNODISPLAY",
-			"-dSAFER",
-			"-dDumpAnnots",
-			"-sDEVICE=nullpage",
-			filePath,
-		]);
-		if (annotsProc.exitCode !== 0) {
-			console.error(
-				`Ghostscript DumpAnnots failed:`,
-				annotsProc.stderr.toString(),
-			);
-			throw new Error(`Ghostscript DumpAnnots failed: ${annotsProc.stderr}`);
-		}
-		const annotsOutput =
-			annotsProc.stdout.toString() + annotsProc.stderr.toString();
-		console.log("DumpAnnots output:", annotsOutput);
-		const has_formfields = /\/Subtype \/Widget/.test(annotsOutput);
-
-		return {
-			file_name: filePath.split("/").pop(),
-			page_count: pageCount,
-			has_formfields,
-			colorProfiles,
-		};
-	} catch (e) {
-		console.error("Ghostscript analysis failed", e);
-		throw new Error("Failed to analyze PDF with Ghostscript.");
 	}
 }
 
@@ -264,7 +312,45 @@ export async function convertDocumentToGrayscale(
 	const outputPath = join(tmpdir(), `${baseName}-${randomUUID()}-grayscale.pdf`);
 
 	try {
-		await convertPdfToGrayscaleFile(tempPath, outputPath);
+		const result = await ghostscriptQueue.run(async () => {
+			const pageCount = await getPdfPageCount(tempPath);
+			const units = pageCount;
+			const reservation = await reserveUnitsForClerkUser(auth.userId, units);
+			if (!reservation.allowed) {
+				return { reservation, units };
+			}
+
+			if (!reservation.reservationId) {
+				throw new Error("Failed to create usage reservation.");
+			}
+
+			try {
+				await convertPdfToGrayscaleFile(tempPath, outputPath);
+				const commitResult = await commitReservationForClerkUser(
+					auth.userId,
+					reservation.reservationId,
+				);
+				if (!commitResult?.committed) {
+					console.warn("Usage reservation commit failed", commitResult);
+				}
+				return { reservation, units };
+			} catch (error) {
+				await releaseReservationForClerkUser(auth.userId, reservation.reservationId);
+				throw error;
+			}
+		});
+
+		if (!result.reservation.allowed) {
+			return res.status(402).json({
+				error: "Monthly quota exceeded.",
+				plan: result.reservation.planId,
+				monthlyQuota: result.reservation.monthlyQuota,
+				unitsThisMonth: result.reservation.totalThisMonth,
+				pendingUnits: result.reservation.pendingUnits,
+				unitsRequested: result.units,
+			});
+		}
+
 		res.setHeader("Content-Type", "application/pdf");
 		return res.download(outputPath, outputName, async (err) => {
 			await unlink(tempPath).catch((cleanupErr) =>
