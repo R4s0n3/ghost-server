@@ -16,6 +16,23 @@ import { apiLimiter } from "./src/middleware/rateLimiters";
 const app = express();
 const port = process.env.PORT || 9001;
 
+const trustProxyEnv = process.env.TRUST_PROXY;
+if (trustProxyEnv !== undefined) {
+	const normalized = trustProxyEnv.trim().toLowerCase();
+	if (normalized === "true") {
+		app.set("trust proxy", true);
+	} else if (normalized === "false") {
+		app.set("trust proxy", false);
+	} else if (/^\d+$/.test(normalized)) {
+		app.set("trust proxy", Number.parseInt(normalized, 10));
+	} else {
+		app.set("trust proxy", trustProxyEnv);
+	}
+} else {
+	// Coolify runs behind a reverse proxy; trust a single hop by default.
+	app.set("trust proxy", 1);
+}
+
 app.use(cors({
 	origin: '*',
 	methods: ['GET', 'POST', 'PATCH', 'DELETE'],
