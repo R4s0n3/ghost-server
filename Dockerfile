@@ -4,9 +4,11 @@ FROM oven/bun:latest
 # Set the working directory inside the container
 WORKDIR /app
 
-# Install Ghostscript
-# Update package lists and install ghostscript
-RUN apt-get update && apt-get install -y ghostscript
+# Install Ghostscript and healthcheck tools
+# Update package lists and install ghostscript + curl for Coolify healthchecks
+RUN apt-get update \
+  && apt-get install -y ghostscript curl \
+  && rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and bun.lockb to leverage Docker cache
 # This step ensures that bun install is only re-run if dependencies change
