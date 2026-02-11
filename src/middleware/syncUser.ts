@@ -1,11 +1,11 @@
 import type { Request, Response, NextFunction } from "express";
-import { clerkClient, type WithAuthProp } from "@clerk/express";
+import { clerkClient } from "@clerk/express";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { getClerkAuth } from "../lib/clerkAuth";
 
 export const syncUser = async (
-  req: WithAuthProp<Request>,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {

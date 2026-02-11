@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 
 // Internal mutation to create or update a user
 export const createOrUpdateUser = internalMutation({
@@ -67,7 +68,7 @@ export const updateStripeCustomerId = internalMutation({
 
 export const getUserForStripe = action({
   args: { clerkId: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Doc<"users"> | null> => {
     return await ctx.runQuery(internal.users.getUserByClerkId, {
       clerkId: args.clerkId,
     });

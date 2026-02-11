@@ -1,5 +1,4 @@
 import type { Request, Response } from "express";
-import { type WithAuthProp } from "@clerk/express";
 import { stripe } from "../lib/stripe";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
@@ -7,7 +6,7 @@ import { getClerkAuth } from "../lib/clerkAuth";
 import { getPlanForPriceId } from "../lib/plans";
 
 export async function createCheckoutSession(
-	req: WithAuthProp<Request>,
+	req: Request,
 	res: Response
 ) {
 	const auth = getClerkAuth(req);
@@ -80,7 +79,7 @@ export async function createCheckoutSession(
 }
 
 export async function syncStripeSession(
-	req: WithAuthProp<Request>,
+	req: Request,
 	res: Response
 ) {
 	const auth = getClerkAuth(req);
@@ -156,7 +155,7 @@ export async function syncStripeSession(
 }
 
 export async function createCustomerPortalSession(
-	req: WithAuthProp<Request>,
+	req: Request,
 	res: Response
 ) {
 	const auth = getClerkAuth(req);

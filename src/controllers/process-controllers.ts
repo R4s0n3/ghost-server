@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { type Request, type Response } from "express";
-import { type WithAuthProp } from "@clerk/express";
 import { getClerkAuth } from "../lib/clerkAuth";
 import {
 	commitReservationForClerkUser,
@@ -72,7 +71,10 @@ export async function analyzePdf(
 				.match(/%%BoundingBox: \d+ \d+ \d+ \d+/g)
 				?.map(line => {
 					const parts = line.replace("%%BoundingBox: ", "").split(" ");
-					const [x1, y1, x2, y2] = parts.map(p => parseInt(p, 10));
+					const x1 = Number.parseInt(parts[0] ?? "0", 10);
+					const y1 = Number.parseInt(parts[1] ?? "0", 10);
+					const x2 = Number.parseInt(parts[2] ?? "0", 10);
+					const y2 = Number.parseInt(parts[3] ?? "0", 10);
 					return { width_pt: x2 - x1, height_pt: y2 - y1 };
 				}) || [];
 		console.log("Parsed page sizes:", pageSizes);
@@ -93,15 +95,15 @@ export async function analyzePdf(
 			]);
 			const inkcovOutput = inkcovResult.stdout.toString().trim();
 			console.log(`Inkcov output for page ${i}:`, inkcovOutput);
-			const [c, m, y, k, type] = inkcovOutput.split(/\s+/);
+			const [cRaw, mRaw, yRaw, kRaw, typeRaw] = inkcovOutput.split(/\s+/);
 
 			const newProfile = {
 				page: i,
-				c: +c,
-				m: +m,
-				y: +y,
-				k: +k,
-				type,
+				c: Number.parseFloat(cRaw ?? "0"),
+				m: Number.parseFloat(mRaw ?? "0"),
+				y: Number.parseFloat(yRaw ?? "0"),
+				k: Number.parseFloat(kRaw ?? "0"),
+				type: typeRaw ?? "",
 			};
 
 			console.log("generated Profile:: ", newProfile);
@@ -170,7 +172,7 @@ export async function testDocument(
 }
 
 export async function preflightDocument(
-	req: WithAuthProp<Request>,
+	req: Request,
 	res: Response,
 ) {
 	// The ClerkExpressWithAuth middleware should protect this route.
@@ -179,6 +181,7 @@ export async function preflightDocument(
 	if (!auth.userId) {
 		return res.status(401).send("Unauthorized");
 	}
+	const userId = auth.userId;
 
 	const file = req.file;
 
@@ -198,7 +201,7 @@ export async function preflightDocument(
 		const result = await ghostscriptQueue.run(async () => {
 			const pageCount = await getPdfPageCount(tempPath);
 			const units = pageCount * 2;
-			const reservation = await reserveUnitsForClerkUser(auth.userId, units);
+			const reservation = await reserveUnitsForClerkUser(userId, units);
 			if (!reservation.allowed) {
 				return { reservation, units };
 			}
@@ -210,7 +213,7 @@ export async function preflightDocument(
 			try {
 				const analysis = await analyzePdf(tempPath, pageCount);
 				const commitResult = await commitReservationForClerkUser(
-					auth.userId,
+					userId,
 					reservation.reservationId,
 				);
 				if (!commitResult?.committed) {
@@ -218,7 +221,7 @@ export async function preflightDocument(
 				}
 				return { analysis, reservation, units };
 			} catch (error) {
-				await releaseReservationForClerkUser(auth.userId, reservation.reservationId);
+				await releaseReservationForClerkUser(userId, reservation.reservationId);
 				throw error;
 			}
 		});
@@ -254,6 +257,13 @@ export function sanitizeBaseName(value: string): string {
 	return base.length > 0 ? base.slice(0, 80) : "document";
 }
 
+function maybeLogGhostscriptTiming(stage: string, startedAtMs: number) {
+	if (process.env.LOG_GHOSTSCRIPT_TIMINGS !== "1") {
+		return;
+	}
+	console.info(`[ghostscript:${stage}] durationMs=${Date.now() - startedAtMs}`);
+}
+
 async function runGhostscript(args: string[]): Promise<void> {
 	const proc = Bun.spawn(args, { stdout: "ignore", stderr: "pipe" });
 	const [exitCode, stderr] = await Promise.all([
@@ -286,13 +296,14 @@ export async function convertPdfToGrayscaleFile(
 }
 
 export async function convertDocumentToGrayscale(
-	req: WithAuthProp<Request>,
+	req: Request,
 	res: Response,
 ) {
 	const auth = getClerkAuth(req);
 	if (!auth.userId) {
 		return res.status(401).send("Unauthorized");
 	}
+	const userId = auth.userId;
 
 	const file = req.file;
 	if (!file) {
@@ -312,43 +323,49 @@ export async function convertDocumentToGrayscale(
 	const outputPath = join(tmpdir(), `${baseName}-${randomUUID()}-grayscale.pdf`);
 
 	try {
-		const result = await ghostscriptQueue.run(async () => {
-			const pageCount = await getPdfPageCount(tempPath);
-			const units = pageCount;
-			const reservation = await reserveUnitsForClerkUser(auth.userId, units);
-			if (!reservation.allowed) {
-				return { reservation, units };
-			}
-
-			if (!reservation.reservationId) {
-				throw new Error("Failed to create usage reservation.");
-			}
-
-			try {
-				await convertPdfToGrayscaleFile(tempPath, outputPath);
-				const commitResult = await commitReservationForClerkUser(
-					auth.userId,
-					reservation.reservationId,
-				);
-				if (!commitResult?.committed) {
-					console.warn("Usage reservation commit failed", commitResult);
+		const pageCountStartedAt = Date.now();
+		const pageCount = await ghostscriptQueue.run(() => getPdfPageCount(tempPath));
+		maybeLogGhostscriptTiming("page-count", pageCountStartedAt);
+		const units = pageCount;
+		const reservation = await reserveUnitsForClerkUser(userId, units);
+		if (!reservation.allowed) {
+			await unlink(tempPath).catch((cleanupErr) =>
+				console.error(`Failed to delete temp file: ${tempPath}`, cleanupErr),
+			);
+			await unlink(outputPath).catch((cleanupErr: any) => {
+				if (cleanupErr?.code !== "ENOENT") {
+					console.error(`Failed to delete output file: ${outputPath}`, cleanupErr);
 				}
-				return { reservation, units };
-			} catch (error) {
-				await releaseReservationForClerkUser(auth.userId, reservation.reservationId);
-				throw error;
-			}
-		});
-
-		if (!result.reservation.allowed) {
+			});
 			return res.status(402).json({
 				error: "Monthly quota exceeded.",
-				plan: result.reservation.planId,
-				monthlyQuota: result.reservation.monthlyQuota,
-				unitsThisMonth: result.reservation.totalThisMonth,
-				pendingUnits: result.reservation.pendingUnits,
-				unitsRequested: result.units,
+				plan: reservation.planId,
+				monthlyQuota: reservation.monthlyQuota,
+				unitsThisMonth: reservation.totalThisMonth,
+				pendingUnits: reservation.pendingUnits,
+				unitsRequested: units,
 			});
+		}
+		if (!reservation.reservationId) {
+			throw new Error("Failed to create usage reservation.");
+		}
+
+		try {
+			const conversionStartedAt = Date.now();
+			await ghostscriptQueue.run(() =>
+				convertPdfToGrayscaleFile(tempPath, outputPath),
+			);
+			maybeLogGhostscriptTiming("grayscale-conversion", conversionStartedAt);
+			const commitResult = await commitReservationForClerkUser(
+				userId,
+				reservation.reservationId,
+			);
+			if (!commitResult?.committed) {
+				console.warn("Usage reservation commit failed", commitResult);
+			}
+		} catch (error) {
+			await releaseReservationForClerkUser(userId, reservation.reservationId);
+			throw error;
 		}
 
 		res.setHeader("Content-Type", "application/pdf");

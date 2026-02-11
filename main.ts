@@ -15,7 +15,14 @@ import { apiLimiter } from "./src/middleware/rateLimiters";
 import { handleStripeWebhook } from "./src/controllers/stripe-webhook-controller";
 
 const app = express();
-const port = process.env.PORT || 9001;
+const parsePort = (value: string | undefined, fallback: number): number => {
+	if (!value) {
+		return fallback;
+	}
+	const parsed = Number.parseInt(value, 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const port = parsePort(process.env.PORT, 9001);
 
 const trustProxyEnv = process.env.TRUST_PROXY;
 if (trustProxyEnv !== undefined) {
@@ -98,5 +105,5 @@ if (keyPath && certPath && fs.existsSync(keyPath) && fs.existsSync(certPath)) {
 }
 
 server.listen(port, "0.0.0.0", () => {
-	console.log(`Server is running over ${port - 1}`);
+	console.log(`Server is running on ${port}`);
 });

@@ -1,5 +1,4 @@
-import type { Response, NextFunction } from "express";
-import { type WithAuthProp } from "@clerk/express";
+import type { Request, Response, NextFunction } from "express";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { getClerkAuth } from "../lib/clerkAuth";
@@ -8,7 +7,7 @@ import { getClerkAuth } from "../lib/clerkAuth";
  * This middleware tracks usage for a logged-in Clerk user.
  * It should be placed after the requireAuth() and syncUser middleware.
  */
-export const trackUsage = (req: WithAuthProp<Request>, res: Response, next: NextFunction) => {
+export const trackUsage = (req: Request, res: Response, next: NextFunction) => {
   const auth = getClerkAuth(req);
   if (auth.userId) {
     // Fire-and-forget the usage tracking action.

@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
-import { type WithAuthProp } from "@clerk/express";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { getClerkAuth } from "../lib/clerkAuth";
 
-export async function generateApiKey(req: WithAuthProp<Request>, res: Response) {
+export async function generateApiKey(req: Request, res: Response) {
   const auth = getClerkAuth(req);
   if (!auth.userId) {
     return res.status(401).send("Unauthorized");
@@ -21,7 +21,7 @@ export async function generateApiKey(req: WithAuthProp<Request>, res: Response) 
   }
 }
 
-export async function listApiKeys(req: WithAuthProp<Request>, res: Response) {
+export async function listApiKeys(req: Request, res: Response) {
   const auth = getClerkAuth(req);
   if (!auth.userId) {
     return res.status(401).send("Unauthorized");
@@ -38,7 +38,7 @@ export async function listApiKeys(req: WithAuthProp<Request>, res: Response) {
   }
 }
 
-export async function deleteApiKey(req: WithAuthProp<Request>, res: Response) {
+export async function deleteApiKey(req: Request, res: Response) {
   const auth = getClerkAuth(req);
   if (!auth.userId) {
     return res.status(401).send("Unauthorized");
@@ -53,7 +53,7 @@ export async function deleteApiKey(req: WithAuthProp<Request>, res: Response) {
   try {
     await convex.action(api.apiKeys.deleteApiKey, {
       clerkId: auth.userId,
-      apiKeyId: id,
+      apiKeyId: id as Id<"apiKeys">,
     });
     res.status(200).json({ message: "API key deleted successfully." });
   } catch (error) {

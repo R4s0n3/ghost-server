@@ -1,10 +1,11 @@
 import { convex } from "./convex";
 import { api } from "../../convex/_generated/api";
-import { PLANS, PlanId, isSubscriptionActive, resolvePlanId } from "./plans";
+import { PLANS, isSubscriptionActive, resolvePlanId, type PlanId } from "./plans";
+import type { Id } from "../../convex/_generated/dataModel";
 
 export type QuotaReservation = {
 	allowed: boolean;
-	reservationId: string | null;
+	reservationId: Id<"usageReservations"> | null;
 	planId: PlanId;
 	monthlyQuota: number | null;
 	totalThisMonth: number;
@@ -40,7 +41,7 @@ export async function reserveUnitsForClerkUser(
 
 export async function commitReservationForClerkUser(
 	clerkId: string,
-	reservationId: string,
+	reservationId: Id<"usageReservations">,
 ) {
 	return convex.action(api.usage.commitReservationForClerkUser, {
 		clerkId,
@@ -50,7 +51,7 @@ export async function commitReservationForClerkUser(
 
 export async function releaseReservationForClerkUser(
 	clerkId: string,
-	reservationId: string,
+	reservationId: Id<"usageReservations">,
 ) {
 	return convex.action(api.usage.releaseReservationForClerkUser, {
 		clerkId,

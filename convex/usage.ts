@@ -1,8 +1,28 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 
 const RESERVATION_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+type ReserveForClerkUserResult = {
+  allowed: boolean;
+  reservationId?: Id<"usageReservations"> | null;
+  totalThisMonth: number;
+  pendingUnits: number;
+  monthlyQuota: number | null;
+};
+
+type CommitReservationForClerkUserResult = {
+  committed: boolean;
+  reason?: string;
+  already?: boolean;
+};
+
+type ReleaseReservationForClerkUserResult = {
+  released: boolean;
+  reason?: string;
+};
 
 export const getUsageData = query({
   args: {
@@ -270,10 +290,13 @@ export const reserveForClerkUser = action({
     units: v.number(),
     monthlyQuota: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
-    const user = await ctx.runQuery(internal.users.getUserByClerkId, {
+  handler: async (ctx, args): Promise<ReserveForClerkUserResult> => {
+    const user: Doc<"users"> | null = await ctx.runQuery(
+      internal.users.getUserByClerkId,
+      {
       clerkId: args.clerkId,
-    });
+      },
+    );
 
     if (!user) {
       return {
@@ -298,10 +321,13 @@ export const commitReservationForClerkUser = action({
     clerkId: v.string(),
     reservationId: v.id("usageReservations"),
   },
-  handler: async (ctx, args) => {
-    const user = await ctx.runQuery(internal.users.getUserByClerkId, {
+  handler: async (ctx, args): Promise<CommitReservationForClerkUserResult> => {
+    const user: Doc<"users"> | null = await ctx.runQuery(
+      internal.users.getUserByClerkId,
+      {
       clerkId: args.clerkId,
-    });
+      },
+    );
 
     if (!user) {
       return { committed: false, reason: "user_not_found" };
@@ -319,10 +345,13 @@ export const releaseReservationForClerkUser = action({
     clerkId: v.string(),
     reservationId: v.id("usageReservations"),
   },
-  handler: async (ctx, args) => {
-    const user = await ctx.runQuery(internal.users.getUserByClerkId, {
+  handler: async (ctx, args): Promise<ReleaseReservationForClerkUserResult> => {
+    const user: Doc<"users"> | null = await ctx.runQuery(
+      internal.users.getUserByClerkId,
+      {
       clerkId: args.clerkId,
-    });
+      },
+    );
 
     if (!user) {
       return { released: false, reason: "user_not_found" };

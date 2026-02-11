@@ -1,11 +1,10 @@
 import type { Request, Response } from "express";
-import { type WithAuthProp } from "@clerk/express";
 import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { getClerkAuth } from "../lib/clerkAuth";
 import { PLANS, isSubscriptionActive, resolvePlanId } from "../lib/plans";
 
-export async function getUsage(req: WithAuthProp<Request>, res: Response) {
+export async function getUsage(req: Request, res: Response) {
   const auth = getClerkAuth(req);
   if (!auth.userId) {
     return res.status(401).send("Unauthorized");

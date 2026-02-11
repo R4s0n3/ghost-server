@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, query, internalQuery } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { customAlphabet } from "nanoid";
 
 const ALPHABET = "023456789abcdefghijklnpqrstuvwxyz";
@@ -13,8 +14,11 @@ const generateApiKey = customAlphabet(ALPHABET, API_KEY_LENGTH);
 
 export const authenticateAndTrackUsage = action({
 	args: { key: v.string() },
-	handler: async (ctx, args) => {
-		const user = await ctx.runQuery(internal.apiKeys._getUserFromApiKey, { key: args.key });
+	handler: async (ctx, args): Promise<Doc<"users"> | null> => {
+		const user: Doc<"users"> | null = await ctx.runQuery(
+			internal.apiKeys._getUserFromApiKey,
+			{ key: args.key },
+		);
 
 		if (!user) {
 			return null;
