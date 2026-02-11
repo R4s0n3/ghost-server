@@ -27,7 +27,58 @@ async function runGhostscriptCommand(args: string[]) {
 	return { stdout, stderr };
 }
 
+let hasLoggedPdfInfoFallback = false;
+
+function logPdfInfoFallback(reason: string) {
+	if (hasLoggedPdfInfoFallback) {
+		return;
+	}
+	hasLoggedPdfInfoFallback = true;
+	console.info(
+		`pdfinfo page-count fast path unavailable (${reason}); falling back to Ghostscript page counting.`,
+	);
+}
+
+async function tryGetPdfPageCountWithPdfInfo(
+	filePath: string,
+): Promise<number | null> {
+	try {
+		const proc = Bun.spawn(["pdfinfo", filePath], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [exitCode, stdout, stderr] = await Promise.all([
+			proc.exited,
+			new Response(proc.stdout).text(),
+			new Response(proc.stderr).text(),
+		]);
+		if (exitCode !== 0) {
+			logPdfInfoFallback(stderr.trim() || `exit=${exitCode}`);
+			return null;
+		}
+		const match = stdout.match(/^\s*Pages:\s+(\d+)\s*$/m);
+		if (!match?.[1]) {
+			logPdfInfoFallback("missing Pages field in pdfinfo output");
+			return null;
+		}
+		const pageCount = Number.parseInt(match[1], 10);
+		if (!Number.isFinite(pageCount) || pageCount <= 0) {
+			logPdfInfoFallback("invalid Pages value in pdfinfo output");
+			return null;
+		}
+		return pageCount;
+	} catch (error: any) {
+		logPdfInfoFallback(error?.message || "spawn failed");
+		return null;
+	}
+}
+
 export async function getPdfPageCount(filePath: string): Promise<number> {
+	const fastPageCount = await tryGetPdfPageCountWithPdfInfo(filePath);
+	if (fastPageCount !== null) {
+		return fastPageCount;
+	}
+
 	const { stdout, stderr } = await runGhostscriptCommand([
 		"gs",
 		"-q",

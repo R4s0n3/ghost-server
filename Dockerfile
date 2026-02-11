@@ -7,7 +7,7 @@ WORKDIR /app
 # Install Ghostscript and healthcheck tools
 # Update package lists and install ghostscript + curl for Coolify healthchecks
 RUN apt-get update \
-  && apt-get install -y ghostscript curl \
+  && apt-get install -y ghostscript curl poppler-utils \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and bun.lockb to leverage Docker cache
