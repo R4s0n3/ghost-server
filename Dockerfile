@@ -29,6 +29,7 @@ RUN apt-get update \
     pkg-config \
     poppler-utils \
     python3 \
+    unzip \
     zlib1g-dev \
   && git clone --depth 1 --branch "${MUPDF_VERSION}" --recurse-submodules \
     https://github.com/ArtifexSoftware/mupdf.git "/tmp/mupdf-${MUPDF_VERSION}" \
