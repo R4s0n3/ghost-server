@@ -16,6 +16,7 @@ pub struct Config {
     pub ghostscript_concurrency: usize,
     pub log_ghostscript_timings: bool,
     pub log_task_queue_timings: bool,
+    pub log_processing_timings: bool,
     pub stripe_price_id_starter: Option<String>,
     pub stripe_price_id_pro: Option<String>,
     pub stripe_price_id_business: Option<String>,
@@ -63,6 +64,9 @@ impl Config {
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             log_task_queue_timings: env::var("LOG_TASK_QUEUE_TIMINGS")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+            log_processing_timings: env::var("LOG_PROCESSING_TIMINGS")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             stripe_price_id_starter: env::var("STRIPE_PRICE_ID_STARTER").ok(),

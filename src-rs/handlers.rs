@@ -1045,10 +1045,18 @@ async fn grayscale_for_clerk_user(
     clerk_id: &str,
     multipart: Multipart,
 ) -> Response {
+    let total_started = Instant::now();
+
+    let upload_started = Instant::now();
     let uploaded = match save_pdf_from_multipart(multipart, 20 * 1024 * 1024).await {
         Ok(file) => file,
         Err(error) => return upload_error_to_response(error),
     };
+    maybe_log_processing_timing(
+        state.config.log_processing_timings,
+        "grayscale-upload",
+        upload_started,
+    );
 
     let temp_path = uploaded.temp_path.clone();
     let original_name = uploaded.original_name;
@@ -1090,8 +1098,14 @@ async fn grayscale_for_clerk_user(
         "page-count",
         page_count_started,
     );
+    maybe_log_processing_timing(
+        state.config.log_processing_timings,
+        "grayscale-page-count",
+        page_count_started,
+    );
 
     let units = page_count;
+    let reserve_started = Instant::now();
     let reservation = match reserve_units_for_clerk_user(&state.convex, &clerk_id, units).await {
         Ok(value) => value,
         Err(error) => {
@@ -1105,6 +1119,11 @@ async fn grayscale_for_clerk_user(
                 .into_response();
         }
     };
+    maybe_log_processing_timing(
+        state.config.log_processing_timings,
+        "grayscale-reserve",
+        reserve_started,
+    );
 
     if !reservation.allowed {
         remove_file_if_exists(&temp_path).await;
@@ -1149,7 +1168,13 @@ async fn grayscale_for_clerk_user(
         "grayscale-conversion",
         conversion_started,
     );
+    maybe_log_processing_timing(
+        state.config.log_processing_timings,
+        "grayscale-conversion",
+        conversion_started,
+    );
 
+    let commit_started = Instant::now();
     match commit_reservation_for_clerk_user(&state.convex, &clerk_id, &reservation_id).await {
         Ok(result) => {
             if !result.committed {
@@ -1160,7 +1185,13 @@ async fn grayscale_for_clerk_user(
             tracing::warn!(error = %error, "failed to commit reservation");
         }
     }
+    maybe_log_processing_timing(
+        state.config.log_processing_timings,
+        "grayscale-commit",
+        commit_started,
+    );
 
+    let read_started = Instant::now();
     let pdf_bytes = match tokio::fs::read(&output_path).await {
         Ok(bytes) => bytes,
         Err(error) => {
@@ -1174,6 +1205,11 @@ async fn grayscale_for_clerk_user(
                 .into_response();
         }
     };
+    maybe_log_processing_timing(
+        state.config.log_processing_timings,
+        "grayscale-read",
+        read_started,
+    );
 
     remove_file_if_exists(&temp_path).await;
     remove_file_if_exists(&output_path).await;
@@ -1187,6 +1223,12 @@ async fn grayscale_for_clerk_user(
         headers.insert(CONTENT_DISPOSITION, content_disposition);
     }
 
+    maybe_log_processing_timing(
+        state.config.log_processing_timings,
+        "grayscale-total",
+        total_started,
+    );
+
     (StatusCode::OK, headers, pdf_bytes).into_response()
 }
 
@@ -1196,6 +1238,14 @@ fn maybe_log_ghostscript_timing(enabled: bool, stage: &str, started_at: Instant)
     }
     let duration_ms = Instant::now().duration_since(started_at).as_millis();
     tracing::info!(stage = stage, duration_ms, "ghostscript timing");
+}
+
+fn maybe_log_processing_timing(enabled: bool, stage: &str, started_at: Instant) {
+    if !enabled {
+        return;
+    }
+    let duration_ms = Instant::now().duration_since(started_at).as_millis();
+    tracing::info!(stage = stage, duration_ms, "processing timing");
 }
 
 fn sanitize_filename_for_header(value: &str) -> String {
