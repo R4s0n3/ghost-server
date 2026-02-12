@@ -3,6 +3,7 @@ mod clerk;
 mod config;
 mod convex;
 mod ghostscript;
+mod mupdf;
 mod handlers;
 mod middleware;
 mod plans;

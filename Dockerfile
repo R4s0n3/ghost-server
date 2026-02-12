@@ -16,6 +16,7 @@ RUN apt-get update \
     ca-certificates \
     curl \
     ghostscript \
+    mupdf-tools \
     poppler-utils \
   && rm -rf /var/lib/apt/lists/*
 

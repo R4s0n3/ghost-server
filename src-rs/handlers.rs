@@ -19,6 +19,7 @@ use crate::{
         analyze_pdf, convert_pdf_to_grayscale_file, convert_pdf_to_grayscale_with_black_controls,
         get_pdf_page_count, sanitize_base_name,
     },
+    mupdf::convert_pdf_to_grayscale_with_mupdf,
     middleware::{AuthenticatedUser, ConvexUser},
     plans::{is_subscription_active, plan_definition, resolve_plan_id, PlanId},
     quota::{
@@ -1062,6 +1063,27 @@ impl GrayscaleMode {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum GrayscaleEngine {
+    Ghostscript,
+    Mupdf,
+}
+
+impl GrayscaleEngine {
+    fn parse(raw: Option<&str>) -> Result<Self, &'static str> {
+        let normalized = raw
+            .map(|value| value.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if normalized.is_empty() || normalized == "ghostscript" || normalized == "gs" {
+            return Ok(Self::Ghostscript);
+        }
+        if normalized == "mupdf" || normalized == "mutool" {
+            return Ok(Self::Mupdf);
+        }
+        Err("Invalid engine. Use \"ghostscript\" or \"mupdf\".")
+    }
+}
+
 async fn grayscale_for_clerk_user(
     state: AppState,
     clerk_id: &str,
@@ -1089,6 +1111,14 @@ async fn grayscale_for_clerk_user(
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response();
         }
     };
+    let engine = match GrayscaleEngine::parse(uploaded.engine.as_deref()) {
+        Ok(value) => value,
+        Err(message) => {
+            remove_file_if_exists(&temp_path).await;
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response();
+        }
+    };
+    tracing::info!(mode = ?mode, engine = ?engine, "grayscale conversion request");
     let force_black_text = state.config.grayscale_production_force_black_text;
     let force_black_vector = state.config.grayscale_production_force_black_vector;
     let black_threshold_l = state.config.grayscale_production_black_threshold_l;
@@ -1180,20 +1210,49 @@ async fn grayscale_for_clerk_user(
     let conversion_started = Instant::now();
     let conversion_result = state
         .run_ghostscript_job("grayscale-conversion", || async {
-            match mode {
-                GrayscaleMode::Preview => {
-                    convert_pdf_to_grayscale_file(&temp_path, &output_path).await
-                }
-                GrayscaleMode::Production => {
-                    convert_pdf_to_grayscale_with_black_controls(
-                        &temp_path,
-                        &output_path,
-                        force_black_text,
-                        force_black_vector,
-                        black_threshold_l,
-                        black_threshold_c,
-                    )
-                    .await
+            match engine {
+                GrayscaleEngine::Ghostscript => match mode {
+                    GrayscaleMode::Preview => {
+                        convert_pdf_to_grayscale_file(&temp_path, &output_path).await
+                    }
+                    GrayscaleMode::Production => {
+                        convert_pdf_to_grayscale_with_black_controls(
+                            &temp_path,
+                            &output_path,
+                            force_black_text,
+                            force_black_vector,
+                            black_threshold_l,
+                            black_threshold_c,
+                        )
+                        .await
+                    }
+                },
+                GrayscaleEngine::Mupdf => {
+                    match convert_pdf_to_grayscale_with_mupdf(&temp_path, &output_path).await {
+                        Ok(()) => Ok(()),
+                        Err(error) if is_mupdf_missing(&error) => {
+                            tracing::warn!(
+                                "mutool not available; falling back to ghostscript conversion"
+                            );
+                            match mode {
+                                GrayscaleMode::Preview => {
+                                    convert_pdf_to_grayscale_file(&temp_path, &output_path).await
+                                }
+                                GrayscaleMode::Production => {
+                                    convert_pdf_to_grayscale_with_black_controls(
+                                        &temp_path,
+                                        &output_path,
+                                        force_black_text,
+                                        force_black_vector,
+                                        black_threshold_l,
+                                        black_threshold_c,
+                                    )
+                                    .await
+                                }
+                            }
+                        }
+                        Err(error) => Err(error),
+                    }
                 }
             }
         })
@@ -1307,6 +1366,10 @@ fn sanitize_filename_for_header(value: &str) -> String {
             }
         })
         .collect()
+}
+
+fn is_mupdf_missing(error: &anyhow::Error) -> bool {
+    error.to_string().contains("mutool-not-found")
 }
 
 fn upload_error_to_response(error: UploadError) -> Response {

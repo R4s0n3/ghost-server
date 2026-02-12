@@ -47,7 +47,7 @@ impl Config {
             env::var("GHOSTSCRIPT_CONCURRENCY")
                 .ok()
                 .or_else(|| env::var("PROCESSING_CONCURRENCY").ok()),
-            3,
+            default_ghostscript_concurrency(),
         );
 
         Ok(Self {
@@ -120,6 +120,12 @@ fn parse_bool(value: Option<String>, fallback: bool) -> bool {
 
 fn parse_f64(value: Option<String>) -> Option<f64> {
     value.and_then(|v| v.parse::<f64>().ok())
+}
+
+fn default_ghostscript_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(|value| value.get())
+        .unwrap_or(3)
 }
 
 fn normalize_convex_url(raw: &str) -> String {

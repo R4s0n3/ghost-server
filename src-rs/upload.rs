@@ -16,6 +16,7 @@ pub struct UploadedPdfRequest {
     pub temp_path: PathBuf,
     pub original_name: String,
     pub mode: Option<String>,
+    pub engine: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -105,6 +106,7 @@ pub async fn save_pdf_with_mode_from_multipart(
 ) -> Result<UploadedPdfRequest, UploadError> {
     let mut uploaded: Option<UploadedFile> = None;
     let mut mode: Option<String> = None;
+    let mut engine: Option<String> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -177,6 +179,16 @@ pub async fn save_pdf_with_mode_from_multipart(
                     mode = Some(trimmed.to_string());
                 }
             }
+            Some("engine") => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|_| UploadError::MultipartError)?;
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    engine = Some(trimmed.to_string());
+                }
+            }
             _ => {}
         }
     }
@@ -187,6 +199,7 @@ pub async fn save_pdf_with_mode_from_multipart(
         temp_path: uploaded.temp_path,
         original_name: uploaded.original_name,
         mode,
+        engine,
     })
 }
 
