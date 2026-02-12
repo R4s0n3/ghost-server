@@ -35,6 +35,10 @@ use tower_http::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let is_production = env::var("NODE_ENV")
+        .ok()
+        .map(|value| value.eq_ignore_ascii_case("production"))
+        .unwrap_or(false);
     let loaded_env_files = load_env_files()?;
     init_tracing();
     if loaded_env_files.is_empty() {
@@ -51,11 +55,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
 
     if config.stripe_secret_key.is_none() {
-        if env::var("NODE_ENV")
-            .ok()
-            .map(|value| value.eq_ignore_ascii_case("production"))
-            .unwrap_or(false)
-        {
+        if is_production {
             return Err(anyhow::anyhow!(
                 "STRIPE_SECRET_KEY environment variable is not set"
             ));
@@ -82,6 +82,21 @@ async fn main() -> anyhow::Result<()> {
         config.stripe_secret_key.clone(),
         config.stripe_webhook_secret.clone(),
     )?;
+
+    match mupdf::ensure_mutool_recolor_support().await {
+        Ok(()) => tracing::info!("mutool recolor support check passed"),
+        Err(error) => {
+            if is_production {
+                return Err(error.context(
+                    "MuPDF runtime check failed. This build requires `mutool recolor` support.",
+                ));
+            }
+            tracing::warn!(
+                error = %error,
+                "MuPDF recolor support check failed; grayscale engine=mupdf may not work"
+            );
+        }
+    }
 
     let state = AppState::new(config.clone(), convex, auth, clerk, stripe);
 

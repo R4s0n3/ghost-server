@@ -18,6 +18,7 @@ RUN apt-get update \
     ghostscript \
     mupdf-tools \
     poppler-utils \
+  && mutool 2>&1 | grep -Eq "recolor[[:space:]]+--" \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/ghost-api-server /usr/local/bin/ghost-api-server
