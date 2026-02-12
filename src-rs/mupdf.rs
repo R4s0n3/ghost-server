@@ -18,7 +18,7 @@ pub async fn convert_pdf_to_grayscale_with_mupdf(
     output_path: &Path,
 ) -> anyhow::Result<()> {
     let program = std::env::var("MUTOOL_BIN").unwrap_or_else(|_| "mutool".to_string());
-    let args = vec![
+    let recolor_args = vec![
         "recolor".to_string(),
         "-c".to_string(),
         "gray".to_string(),
@@ -27,7 +27,31 @@ pub async fn convert_pdf_to_grayscale_with_mupdf(
         input_path.to_string_lossy().to_string(),
     ];
 
-    run_command(&program, &args).await.map(|_| ())
+    match run_command(&program, &recolor_args).await {
+        Ok(_) => Ok(()),
+        Err(error) if is_recolor_unsupported(&error) => {
+            // Legacy mutool builds (common in older distro packages) do not have `recolor`.
+            // Retry with `convert` and grayscale raster options to preserve compatibility.
+            let convert_args = vec![
+                "convert".to_string(),
+                "-F".to_string(),
+                "pdf".to_string(),
+                "-O".to_string(),
+                "colorspace=gray".to_string(),
+                "-o".to_string(),
+                output_path.to_string_lossy().to_string(),
+                input_path.to_string_lossy().to_string(),
+            ];
+            run_command(&program, &convert_args).await.map(|_| ())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn is_recolor_unsupported(error: &anyhow::Error) -> bool {
+    let message = error.to_string().to_lowercase();
+    message.contains("usage: mutool <command>")
+        || (message.contains("unknown command") && message.contains("recolor"))
 }
 
 async fn run_command(program: &str, args: &[String]) -> anyhow::Result<(String, String)> {
