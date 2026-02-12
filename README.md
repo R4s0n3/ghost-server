@@ -48,3 +48,9 @@ Build and run with:
 docker build -t ghost-api-server .
 docker run --rm -p 9001:9001 --env-file .env ghost-api-server
 ```
+
+The runtime image builds MuPDF from upstream source and enforces:
+- `mutool` version `>= 1.26.8`
+- `mutool recolor` command availability
+
+This prevents grayscale `engine=mupdf` behavior from drifting across environments.

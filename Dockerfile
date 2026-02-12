@@ -30,8 +30,8 @@ RUN apt-get update \
     poppler-utils \
     python3 \
     zlib1g-dev \
-  && curl -fsSL "https://github.com/ArtifexSoftware/mupdf/archive/refs/tags/${MUPDF_VERSION}.tar.gz" \
-    | tar -xz -C /tmp \
+  && git clone --depth 1 --branch "${MUPDF_VERSION}" --recurse-submodules \
+    https://github.com/ArtifexSoftware/mupdf.git "/tmp/mupdf-${MUPDF_VERSION}" \
   && make -C "/tmp/mupdf-${MUPDF_VERSION}" HAVE_X11=no HAVE_GLUT=no prefix=/usr/local install \
   && INSTALLED_MUTOOL_VERSION="$(mutool 2>&1 | awk '/^mutool version/{print $3; exit}')" \
   && test -n "${INSTALLED_MUTOOL_VERSION}" \
