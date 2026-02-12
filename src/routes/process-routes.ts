@@ -35,6 +35,6 @@ router.post(
 );
 
 // Route for document conversion
-router.get("/conversion", (req, res) => res.send("conversion"));
+router.get("/conversion", (_req, res) => res.send("conversion"));
 
 export default router;

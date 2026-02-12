@@ -16,7 +16,8 @@ use uuid::Uuid;
 
 use crate::{
     ghostscript::{
-        analyze_pdf, convert_pdf_to_grayscale_file, get_pdf_page_count, sanitize_base_name,
+        analyze_pdf, convert_pdf_to_grayscale_file, convert_pdf_to_grayscale_with_black_controls,
+        get_pdf_page_count, sanitize_base_name,
     },
     middleware::{AuthenticatedUser, ConvexUser},
     plans::{is_subscription_active, plan_definition, resolve_plan_id, PlanId},
@@ -27,7 +28,7 @@ use crate::{
     serde_convex::de_i64_from_number,
     state::AppState,
     stripe_api::{StripeEvent, StripeInvoice, StripeSubscription},
-    upload::{remove_file_if_exists, save_pdf_from_multipart, UploadError},
+    upload::{remove_file_if_exists, save_pdf_from_multipart, save_pdf_with_mode_from_multipart, UploadError},
 };
 
 #[derive(Debug, Deserialize)]
@@ -1040,6 +1041,27 @@ async fn preflight_for_clerk_user(
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum GrayscaleMode {
+    Preview,
+    Production,
+}
+
+impl GrayscaleMode {
+    fn parse(raw: Option<&str>) -> Result<Self, &'static str> {
+        let normalized = raw
+            .map(|value| value.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if normalized.is_empty() || normalized == "preview" {
+            return Ok(Self::Preview);
+        }
+        if normalized == "production" {
+            return Ok(Self::Production);
+        }
+        Err("Invalid mode. Use \"preview\" or \"production\".")
+    }
+}
+
 async fn grayscale_for_clerk_user(
     state: AppState,
     clerk_id: &str,
@@ -1048,7 +1070,7 @@ async fn grayscale_for_clerk_user(
     let total_started = Instant::now();
 
     let upload_started = Instant::now();
-    let uploaded = match save_pdf_from_multipart(multipart, 20 * 1024 * 1024).await {
+    let uploaded = match save_pdf_with_mode_from_multipart(multipart, 20 * 1024 * 1024).await {
         Ok(file) => file,
         Err(error) => return upload_error_to_response(error),
     };
@@ -1060,6 +1082,17 @@ async fn grayscale_for_clerk_user(
 
     let temp_path = uploaded.temp_path.clone();
     let original_name = uploaded.original_name;
+    let mode = match GrayscaleMode::parse(uploaded.mode.as_deref()) {
+        Ok(value) => value,
+        Err(message) => {
+            remove_file_if_exists(&temp_path).await;
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": message }))).into_response();
+        }
+    };
+    let force_black_text = state.config.grayscale_production_force_black_text;
+    let force_black_vector = state.config.grayscale_production_force_black_vector;
+    let black_threshold_l = state.config.grayscale_production_black_threshold_l;
+    let black_threshold_c = state.config.grayscale_production_black_threshold_c;
 
     let base_name = sanitize_base_name(
         Path::new(&original_name)
@@ -1147,7 +1180,22 @@ async fn grayscale_for_clerk_user(
     let conversion_started = Instant::now();
     let conversion_result = state
         .run_ghostscript_job("grayscale-conversion", || async {
-            convert_pdf_to_grayscale_file(&temp_path, &output_path).await
+            match mode {
+                GrayscaleMode::Preview => {
+                    convert_pdf_to_grayscale_file(&temp_path, &output_path).await
+                }
+                GrayscaleMode::Production => {
+                    convert_pdf_to_grayscale_with_black_controls(
+                        &temp_path,
+                        &output_path,
+                        force_black_text,
+                        force_black_vector,
+                        black_threshold_l,
+                        black_threshold_c,
+                    )
+                    .await
+                }
+            }
         })
         .await;
 

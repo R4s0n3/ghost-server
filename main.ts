@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import { clerkMiddleware } from "@clerk/express";
 import http from "http";
 import processRoutes from "./src/routes/process-routes";
 import healthRoutes from "./src/routes/health-routes";
@@ -53,7 +52,7 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handl
 // Middleware to parse JSON request bodies
 app.use(express.json());
 
-app.use((err: any, req: any, res: any, next: any) => {
+app.use((err: any, _req: any, res: any, _next: any) => {
 	console.error(err.stack);
 	res.status(401).send("Unauthenticated!");
 });
@@ -72,7 +71,7 @@ apiRouter.use("/process", apiProcessRoutes); // Added
 
 app.use("/api", apiRouter);
 
-app.use((req, res) => {
+app.use((_req, res) => {
 	res.status(404).send("Not Found");
 });
 

@@ -17,6 +17,10 @@ pub struct Config {
     pub log_ghostscript_timings: bool,
     pub log_task_queue_timings: bool,
     pub log_processing_timings: bool,
+    pub grayscale_production_force_black_text: bool,
+    pub grayscale_production_force_black_vector: bool,
+    pub grayscale_production_black_threshold_l: Option<f64>,
+    pub grayscale_production_black_threshold_c: Option<f64>,
     pub stripe_price_id_starter: Option<String>,
     pub stripe_price_id_pro: Option<String>,
     pub stripe_price_id_business: Option<String>,
@@ -69,6 +73,20 @@ impl Config {
             log_processing_timings: env::var("LOG_PROCESSING_TIMINGS")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
+            grayscale_production_force_black_text: parse_bool(
+                env::var("GRAYSCALE_PRODUCTION_FORCE_BLACK_TEXT").ok(),
+                true,
+            ),
+            grayscale_production_force_black_vector: parse_bool(
+                env::var("GRAYSCALE_PRODUCTION_FORCE_BLACK_VECTOR").ok(),
+                true,
+            ),
+            grayscale_production_black_threshold_l: parse_f64(
+                env::var("GRAYSCALE_PRODUCTION_BLACK_THRESHOLD_L").ok(),
+            ),
+            grayscale_production_black_threshold_c: parse_f64(
+                env::var("GRAYSCALE_PRODUCTION_BLACK_THRESHOLD_C").ok(),
+            ),
             stripe_price_id_starter: env::var("STRIPE_PRICE_ID_STARTER").ok(),
             stripe_price_id_pro: env::var("STRIPE_PRICE_ID_PRO").ok(),
             stripe_price_id_business: env::var("STRIPE_PRICE_ID_BUSINESS").ok(),
@@ -89,6 +107,19 @@ fn parse_usize(value: Option<String>, fallback: usize) -> usize {
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(fallback)
+}
+
+fn parse_bool(value: Option<String>, fallback: bool) -> bool {
+    value
+        .map(|raw| {
+            let normalized = raw.trim().to_ascii_lowercase();
+            !matches!(normalized.as_str(), "0" | "false" | "off" | "no")
+        })
+        .unwrap_or(fallback)
+}
+
+fn parse_f64(value: Option<String>) -> Option<f64> {
+    value.and_then(|v| v.parse::<f64>().ok())
 }
 
 fn normalize_convex_url(raw: &str) -> String {

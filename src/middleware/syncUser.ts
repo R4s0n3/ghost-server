@@ -6,7 +6,7 @@ import { getClerkAuth } from "../lib/clerkAuth";
 
 export const syncUser = async (
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ) => {
   const auth = getClerkAuth(req);

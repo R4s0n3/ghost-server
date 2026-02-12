@@ -3,7 +3,7 @@ import { convex } from "../lib/convex";
 import { api } from "../../convex/_generated/api";
 import { exec } from "child_process";
 
-export async function getHealth(req: Request, res: Response) {
+export async function getHealth(_req: Request, res: Response) {
   let ghostscriptStatus = "Not checked";
   let ghostscriptError = null;
 

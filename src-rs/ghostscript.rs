@@ -204,6 +204,43 @@ pub async fn convert_pdf_to_grayscale_file(
     run_command("gs", &args).await.map(|_| ())
 }
 
+pub async fn convert_pdf_to_grayscale_with_black_controls(
+    input_path: &Path,
+    output_path: &Path,
+    force_black_text: bool,
+    force_black_vector: bool,
+    black_threshold_l: Option<f64>,
+    black_threshold_c: Option<f64>,
+) -> anyhow::Result<()> {
+    let mut args = vec![
+        "-q".to_string(),
+        "-dNOPAUSE".to_string(),
+        "-dBATCH".to_string(),
+        "-dSAFER".to_string(),
+        "-sDEVICE=pdfwrite".to_string(),
+        "-sColorConversionStrategy=Gray".to_string(),
+        "-dProcessColorModel=/DeviceGray".to_string(),
+    ];
+
+    if force_black_text {
+        args.push("-dBlackText".to_string());
+    }
+    if force_black_vector {
+        args.push("-dBlackVector".to_string());
+    }
+    if let Some(value) = black_threshold_l {
+        args.push(format!("-dBlackThresholdL={}", value));
+    }
+    if let Some(value) = black_threshold_c {
+        args.push(format!("-dBlackThresholdC={}", value));
+    }
+
+    args.push(format!("-sOutputFile={}", output_path.to_string_lossy()));
+    args.push(input_path.to_string_lossy().to_string());
+
+    run_command("gs", &args).await.map(|_| ())
+}
+
 pub fn sanitize_base_name(value: &str) -> String {
     static NON_SAFE_RE: once_cell::sync::Lazy<Regex> =
         once_cell::sync::Lazy::new(|| Regex::new(r"[^a-zA-Z0-9_-]+").expect("valid regex"));
