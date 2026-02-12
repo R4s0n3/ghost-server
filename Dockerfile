@@ -1,29 +1,26 @@
-# Use the official Bun image as a base
-FROM oven/bun:latest
+# syntax=docker/dockerfile:1
 
-# Set the working directory inside the container
+FROM rust:1.85-slim AS builder
 WORKDIR /app
 
-# Install Ghostscript and healthcheck tools
-# Update package lists and install ghostscript + curl for Coolify healthchecks
+COPY Cargo.toml Cargo.lock ./
+COPY src-rs ./src-rs
+
+RUN cargo build --locked --release --bin ghost-api-server
+
+FROM debian:bookworm-slim AS runtime
+WORKDIR /app
+
 RUN apt-get update \
-  && apt-get install -y ghostscript curl poppler-utils \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    ghostscript \
+    poppler-utils \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy package.json and bun.lockb to leverage Docker cache
-# This step ensures that bun install is only re-run if dependencies change
-COPY package.json bun.lock ./
+COPY --from=builder /app/target/release/ghost-api-server /usr/local/bin/ghost-api-server
 
-# Install Bun dependencies
-RUN bun install --production
-
-# Copy the rest of your application code
-COPY . .
-
-# Expose the port your application listens on
-# Your server listens on process.env.PORT or 9001
 EXPOSE 9001
 
-# Command to run the application
-# Use 'bun run start' as defined in your package.json
-CMD ["bun", "run", "start"]
+CMD ["/usr/local/bin/ghost-api-server"]

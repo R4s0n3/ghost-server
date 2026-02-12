@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+target
+.cursor
+.env
+.env.local
+*.log
+*.tmp
+convex/_generated
+README.md
+main.ts
+src/

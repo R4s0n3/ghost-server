@@ -2,10 +2,11 @@
   "name": "server",
   "private": true,
   "scripts": {
-    "start": "bun run dev",
-    "dev": "bun --hot main.ts",
-    "start:server": "bun --hot main.ts",
-    "start:convex": "bunx convex dev"
+    "start": "cargo run --bin ghost-api-server",
+    "dev": "cargo run --bin ghost-api-server",
+    "start:server": "cargo run --bin ghost-api-server",
+    "start:convex": "bunx convex dev",
+    "start:legacy": "bun --hot main.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
